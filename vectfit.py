@@ -25,8 +25,7 @@ def cc(z):
     return z.conjugate()
 
 def model(s, poles, residues, d, h):
-    return sum(r/(s - p) for p, r in zip(poles, residues)) + \
-           sum(r.conjugate()/(s - p.conjugate()) for p, r in zip(poles, residues)) + d + s*h
+    return sum(r/(s-p) for p, r in zip(poles, residues)) + d + s*h
 
 def vectfit_step(f, s, poles):
     """
@@ -47,7 +46,7 @@ def vectfit_step(f, s, poles):
     for i, p in enumerate(poles):
         if p.imag != 0:
             if i == 0 or cindex[i-1] != 1:
-                assert cc(poles[i]) == poles[i+1], ("Complex poles must come in conjugate pairs: %s, %s" % poles[i:i+1])
+                assert cc(poles[i]) == poles[i+1], ("Complex poles must come in conjugate pairs: %s, %s" % (poles[i], poles[i+1]))
                 cindex[i] = 1
             else:
                 cindex[i] = 2
@@ -152,18 +151,38 @@ def calculate_residues(f, s, poles):
     return residues, d, h
 
 def make_plot(s, freal, poles, residues, d, h):
+    from brune import quadrant_plot
     fpoles = sum(c/(s - a) for c, a in zip(residues, poles)) + d + s*h
     xs = imag(s)
-    import matplotlib.pyplot as plt
-    plt.clf()
-    plt.plot(xs, abs(freal))
-    plt.plot(xs, abs(fpoles))
-    plt.show()
+    quadrant_plot(xs, freal, "Input")
+    quadrant_plot(xs, fpoles, "Fitted")
+    subplot(2,2,1)
+    yscale('log')
+    subplot(2,2,3)
+    yscale('log')
+
+def vectfit_auto(f, s, n_poles=10, n_iter=10, show=False, inc_real=False):
+    w = imag(s)
+    pole_locs = linspace(w[0], w[-1], n_poles+2)[1:-1]
+    poles = concatenate([[-p/100. + 1j*p, -p/100. - 1j*p] for p in pole_locs])
+    if inc_real:
+        poles = concatenate((poles, [1]))
+    for _ in range(n_iter):
+        poles = vectfit_step(f, s, poles)
+    residues, d, h = calculate_residues(f, s, poles)
+    print "poles:", poles
+    print "residues:", residues
+    print "offset:", d
+    print "slope:", h
+    if show:
+        make_plot(s, f, poles, residues, d, h)
+    return poles, residues, d, h
+
 
 
 
 if __name__ == '__main__':
-    test_s = 1j*np.linspace(0, 1e5, 200)
+    test_s = 1j*np.linspace(1, 1e5, 200)
     test_poles = [
         -4500,
         -41000,
@@ -196,7 +215,7 @@ if __name__ == '__main__':
 
 
     poles = concatenate([(1j*x + x/100., -1j*x + x/100) for x in linspace(1, 1e5, 10)])
-    for i in range(4):
+    for i in range(1):
         poles = vectfit_step(test_f, test_s, poles)
         residues, d, h = calculate_residues(test_f, test_s, poles)
         print poles
@@ -204,4 +223,3 @@ if __name__ == '__main__':
         print d
         print h
         make_plot(test_s, test_f, poles, residues, d, h)
-
