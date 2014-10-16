@@ -19,7 +19,7 @@ All credit goes to Bjorn Gustavsen for his MATLAB implementation, and the follow
 """
 __author__ = 'Phil Reinhold'
 from pylab import *
-from numpy.linalg import pinv, eigvals
+from numpy.linalg import eigvals, lstsq
 
 def cc(z):
     return z.conjugate()
@@ -72,7 +72,7 @@ def vectfit_step(f, s, poles):
     b = f
     A = vstack((real(A), imag(A)))
     b = concatenate((real(b), imag(b)))
-    x = dot(pinv(A), b)
+    x, residuals, rnk, s = lstsq(A, b, rcond=-1)
 
     residues = x[:N]
     d = x[N]
@@ -104,7 +104,7 @@ def vectfit_step(f, s, poles):
     return new_poles
 
 # Dear gods of coding style, I sincerely apologize for the following copy/paste
-def calculate_residues(f, s, poles):
+def calculate_residues(f, s, poles, rcond=-1):
     Ns = len(s)
     N = len(poles)
 
@@ -118,7 +118,7 @@ def calculate_residues(f, s, poles):
                 cindex[i] = 2
 
     # use the new poles to extract the residues
-    A = zeros((Ns, N+2), dtype=np.complex64)
+    A = zeros((Ns, N+2), dtype=np.complex128)
     for i, p in enumerate(poles):
         if cindex[i] == 0:
             A[:, i] = 1/(s - p)
@@ -135,7 +135,11 @@ def calculate_residues(f, s, poles):
     b = f
     A = vstack((real(A), imag(A)))
     b = concatenate((real(b), imag(b)))
-    x = dot(pinv(A), b)
+    cA = np.linalg.cond(A)
+    if cA > 1e13:
+        print 'Warning!: Ill Conditioned Matrix. Consider scaling the problem down'
+        print 'Cond(A)', cA
+    x, residuals, rnk, s = lstsq(A, b, rcond=rcond)
 
     # Recover complex values
     x = np.complex64(x)
@@ -146,43 +150,67 @@ def calculate_residues(f, s, poles):
            x[i+1] = r1 + 1j*r2
 
     residues = x[:N]
-    d = x[N]
-    h = x[N+1]
+    d = x[N].real
+    h = x[N+1].real
     return residues, d, h
 
 def make_plot(s, freal, poles, residues, d, h):
     from brune import quadrant_plot
     fpoles = sum(c/(s - a) for c, a in zip(residues, poles)) + d + s*h
     xs = imag(s)
-    quadrant_plot(xs, freal, "Input")
-    quadrant_plot(xs, fpoles, "Fitted")
+    quadrant_plot(xs, -1j*freal, "Input")
+    quadrant_plot(xs, -1j*fpoles, "Fitted")
     subplot(2,2,1)
-    yscale('log')
     subplot(2,2,3)
-    yscale('log')
 
-def vectfit_auto(f, s, n_poles=10, n_iter=10, show=False, inc_real=False):
+def print_params(poles, residues, d, h):
+    cfmt = "{0.real:g} + {0.imag:g}j"
+    print "poles: " + ", ".join(cfmt.format(p) for p in poles)
+    print "residues: " + ", ".join(cfmt.format(r) for r in residues)
+    print "offset: {:g}".format(d)
+    print "slope: {:g}".format(h)
+
+def vectfit_auto(f, s, n_poles=10, n_iter=10, show=False,
+                 inc_real=False, loss_ratio=1e-2, rcond=-1, track_poles=False):
     w = imag(s)
     pole_locs = linspace(w[0], w[-1], n_poles+2)[1:-1]
-    poles = concatenate([[-p/100. + 1j*p, -p/100. - 1j*p] for p in pole_locs])
+    lr = loss_ratio
+    init_poles = poles = concatenate([[p*(-lr + 1j), p*(-lr - 1j)] for p in pole_locs])
+
     if inc_real:
         poles = concatenate((poles, [1]))
+
+    poles_list = []
     for _ in range(n_iter):
         poles = vectfit_step(f, s, poles)
-    residues, d, h = calculate_residues(f, s, poles)
-    print "poles:", poles
-    print "residues:", residues
-    print "offset:", d
-    print "slope:", h
+        poles_list.append(poles)
+
+    residues, d, h = calculate_residues(f, s, poles, rcond=rcond)
+
     if show:
         make_plot(s, f, poles, residues, d, h)
+
+    if track_poles:
+        return poles, residues, d, h, np.array(poles_list)
+
+    print_params(poles, residues, d, h)
     return poles, residues, d, h
 
-
-
+def vectfit_auto_rescale(f, s, **kwargs):
+    s_scale = abs(s[-1])
+    f_scale = abs(f[-1])
+    print 'SCALED'
+    poles_s, residues_s, d_s, h_s = vectfit_auto(f / f_scale, s / s_scale, **kwargs)
+    poles = poles_s * s_scale
+    residues = residues_s * f_scale * s_scale
+    d = d_s * f_scale
+    h = h_s * f_scale / s_scale
+    print 'UNSCALED'
+    print_params(poles, residues, d, h)
+    return poles, residues, d, h
 
 if __name__ == '__main__':
-    test_s = 1j*np.linspace(1, 1e5, 200)
+    test_s = 1j*np.linspace(1, 1e5, 800)
     test_poles = [
         -4500,
         -41000,
@@ -212,14 +240,14 @@ if __name__ == '__main__':
 
     test_f = sum(c/(test_s - a) for c, a in zip(test_residues, test_poles))
     test_f += test_d + test_h*test_s
+    vectfit_auto(test_f, test_s)
 
-
-    poles = concatenate([(1j*x + x/100., -1j*x + x/100) for x in linspace(1, 1e5, 10)])
-    for i in range(1):
-        poles = vectfit_step(test_f, test_s, poles)
-        residues, d, h = calculate_residues(test_f, test_s, poles)
-        print poles
-        print residues
-        print d
-        print h
-        make_plot(test_s, test_f, poles, residues, d, h)
+    figure()
+    poles, residues, d, h = vectfit_auto_rescale(test_f, test_s, show=True)
+    fitted = model(test_s, poles, residues, d, h)
+    figure()
+    plot(test_s.imag, test_f.real)
+    plot(test_s.imag, test_f.imag)
+    plot(test_s.imag, fitted.real)
+    plot(test_s.imag, fitted.imag)
+    show()
