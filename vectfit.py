@@ -154,15 +154,6 @@ def calculate_residues(f, s, poles, rcond=-1):
     h = x[N+1].real
     return residues, d, h
 
-def make_plot(s, freal, poles, residues, d, h):
-    from brune import quadrant_plot
-    fpoles = sum(c/(s - a) for c, a in zip(residues, poles)) + d + s*h
-    xs = imag(s)
-    quadrant_plot(xs, -1j*freal, "Input")
-    quadrant_plot(xs, -1j*fpoles, "Fitted")
-    subplot(2,2,1)
-    subplot(2,2,3)
-
 def print_params(poles, residues, d, h):
     cfmt = "{0.real:g} + {0.imag:g}j"
     print "poles: " + ", ".join(cfmt.format(p) for p in poles)
@@ -186,9 +177,6 @@ def vectfit_auto(f, s, n_poles=10, n_iter=10, show=False,
         poles_list.append(poles)
 
     residues, d, h = calculate_residues(f, s, poles, rcond=rcond)
-
-    if show:
-        make_plot(s, f, poles, residues, d, h)
 
     if track_poles:
         return poles, residues, d, h, np.array(poles_list)
@@ -242,8 +230,7 @@ if __name__ == '__main__':
     test_f += test_d + test_h*test_s
     vectfit_auto(test_f, test_s)
 
-    figure()
-    poles, residues, d, h = vectfit_auto_rescale(test_f, test_s, show=True)
+    poles, residues, d, h = vectfit_auto_rescale(test_f, test_s)
     fitted = model(test_s, poles, residues, d, h)
     figure()
     plot(test_s.imag, test_f.real)
